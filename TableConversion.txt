@@ -1,0 +1,771 @@
+Option Explicit
+    'updated 9/28/2016
+    'set york as default selected brand list (will need to remove for Guardian/Evcon only brands like GAC & QH4)
+    'added On Error Resume Next (should allow Marcie to run on her PC)
+    
+    'updated 6/23/2016
+    'use that directory to save all new workbooks in
+    'create new workbook for each named range
+    'paste the table in the new workbook
+    'name that workbook the name of the named range
+    'supress notifications (so you can overwrite files without getting prompts for all the files) - (should be code in the Arbortext Middleware)
+    'create second set of workbooks without headers & header only (need to create array with list of all tables and the number of rows for the header)
+    
+    
+    Public wbTechGuide As Workbook, wbBrandedProductOfferings As Workbook
+
+    Public nName As name, thisRng As Range, thisBrandRng As Range, brandColumn As Integer, york As Integer, yorkColumn As Integer
+    Public ws As Worksheet
+    Public thisModel As String, targetModel As String
+    Public b As Integer, c As Integer, i As Integer, ii As Integer, n As Integer, r As Integer
+   
+    Public fileTechGuide As String, fileNew As String, filePath As String, thisName As String
+    Public wbNew As Workbook, wbBrandedTechGuide As Workbook
+
+    Public sizeColAndRow As Variant, tableRowCounter As Integer
+    Public HeaderRows As Integer, thisTableWidth As Double, thisTableWidthAdjustmentFactor As Double
+    Public fso As Object
+    Public fldrname As String
+    Public fldrpath As String
+    Public techGuideFileName As String
+    
+    Public lStartC As Integer, lStartR As Integer, thisCol As Integer, thisRow As Integer
+    Public deleteThisData As Boolean, deleteRow As Boolean, deleteCol As Boolean
+    Public nNameOfTable As name
+    Public nmsInTechGuide As Variant
+    Public BrandList As Variant, TableList As Variant, isSelectedTable As Boolean, createYorkBrandTechGuide As Boolean
+    Public theLargerOfTheTwo As Integer, newRowHeight As Double, newColumnWidth As Double
+    
+Private Sub cbBrands_Click()
+    If cbBrands.Value = True Then
+        For i = 0 To lbAvailableBrands.ListCount - 1
+            lbAvailableBrands.Selected(i) = True
+        Next i
+    End If
+    
+    If cbBrands.Value = False Then
+        For i = 0 To lbAvailableBrands.ListCount - 1
+            lbAvailableBrands.Selected(i) = False
+        Next i
+    End If
+End Sub
+
+Private Sub cbTables_Click()
+    If cbTables.Value = True Then
+        For i = 0 To lbAvailableTables.ListCount - 1
+            lbAvailableTables.Selected(i) = True
+        Next i
+    End If
+    
+    If cbTables.Value = False Then
+        For i = 0 To lbAvailableTables.ListCount - 1
+            lbAvailableTables.Selected(i) = False
+        Next i
+    End If
+End Sub
+
+Private Sub cmdAddBrand_Click()
+    Dim valExists As Boolean
+    
+    For i = 0 To lbAvailableBrands.ListCount - 1
+        If lbAvailableBrands.Selected(i) = True Then
+            valExists = False
+        
+            For n = 0 To lbSelectedBrands.ListCount - 1
+                If lbSelectedBrands.List(n) = lbAvailableBrands.List(i) Then valExists = True
+            Next n
+        
+            If Not valExists Then lbSelectedBrands.AddItem lbAvailableBrands.List(i)
+        End If
+    Next i
+End Sub
+
+Private Sub cmdAddTable_Click()
+    Dim valExists As Boolean
+    
+    For i = 0 To lbAvailableTables.ListCount - 1
+        If lbAvailableTables.Selected(i) = True Then
+            valExists = False
+        
+            For n = 0 To lbSelectedTables.ListCount - 1
+                If lbSelectedTables.List(n) = lbAvailableTables.List(i) Then valExists = True
+            Next n
+        
+            If Not valExists Then lbSelectedTables.AddItem lbAvailableTables.List(i)
+        End If
+    Next i
+End Sub
+
+Private Sub cmdRemoveBrand_Click()
+    Dim counter As Integer
+    counter = 0
+    
+    For i = 0 To lbSelectedBrands.ListCount - 1
+        If lbSelectedBrands.Selected(i - counter) Then
+            lbSelectedBrands.RemoveItem (i - counter)
+            counter = counter + 1
+        End If
+    Next i
+    
+    cbBrands.Value = False
+End Sub
+
+Private Sub cmdRemoveTable_Click()
+    Dim counter As Integer
+    counter = 0
+    
+    For i = 0 To lbSelectedTables.ListCount - 1
+        If lbSelectedTables.Selected(i - counter) Then
+            lbSelectedTables.RemoveItem (i - counter)
+            counter = counter + 1
+        End If
+    Next i
+    
+    cbTables.Value = False
+End Sub
+
+Private Sub cmdRunMacro_Click()
+
+    On Error Resume Next 'should take care of Marcie's error on her machine ***********************************
+
+'    Dim valExists As Boolean
+'    valExists = False
+'
+'    For n = 0 To lbSelectedBrands.ListCount - 1
+'        If lbSelectedBrands.List(n) = BrandList(york) Then valExists = True
+'    Next n
+'
+'    If Not valExists Then lbSelectedBrands.AddItem lbAvailableBrands.List(i)
+
+    york = 0
+    createYorkBrandTechGuide = False
+    newRowHeight = 0
+    If cbRowHeight.Value <> "default" And cbRowHeight.Value > 0 Then
+        newRowHeight = cbRowHeight.Value
+    End If
+    newColumnWidth = 0
+    If cbColumnWidth.Value <> "default" And cbColumnWidth.Value > 0 Then
+        newColumnWidth = cbColumnWidth.Value
+    End If
+    
+    ReDim BrandList(1 To lbSelectedBrands.ListCount) 'ReDim BrandList(1 To lbSelectedBrands.ListCount + 1)
+    For i = 0 To lbSelectedBrands.ListCount - 1
+        'currently we need to identify which item will be york (could add it to the end if it's not in the list)
+        'if its in the list, then we'll set york integer to the index value
+        BrandList(i + 1) = lbSelectedBrands.List(i)
+        If BrandList(i + 1) = "York" Then
+            york = i + 1
+            createYorkBrandTechGuide = True
+        End If
+    Next i
+    
+'*******May need to ReDim the array & add a York to use as the base brand  or just always assume it's the base brand, but not overwrite the last item as York
+    If york = 0 Then
+        york = UBound(BrandList, 1)
+        BrandList(york) = "York"
+    End If
+    
+    ReDim TableList(1 To lbSelectedTables.ListCount)
+    For i = 0 To lbSelectedTables.ListCount - 1
+        TableList(i + 1) = lbSelectedTables.List(i)
+    Next i
+    
+    wbBrandedProductOfferings.Activate
+'    Set nms = wbBrandedProductOfferings.Names
+
+    'Delete any named ranges with broken reference
+    For Each nName In wbBrandedProductOfferings.Names 'nms
+        If InStr(1, nName.RefersTo, "#REF!") > 0 Then
+            nName.Delete
+        End If
+    Next nName
+    
+    'Create Directory for each brand within current directory, convert TechGuide to each brand & create workbooks for each named range in the tech guide (also header/body workbooks for specific tables)
+    For b = 1 To UBound(BrandList, 1)
+        If b <> york Or (b = york And createYorkBrandTechGuide) Then
+            'Create workbook for this brand of tech guide
+            'file name
+            Set wbBrandedTechGuide = Workbooks.Open(fileTechGuide)
+            deleteThisData = False
+            
+            'Create Directory for brand
+            Set fso = CreateObject("scripting.filesystemobject")
+            fldrname = BrandList(b)
+            fldrpath = filePath & fldrname
+            If Not fso.FolderExists(fldrpath) Then
+                fso.CreateFolder (fldrpath)
+            End If
+                
+'            fileNew = fldrpath & "\" & techGuideFileName & " " & BrandList(b) & ".xlsx"
+            fileNew = fldrpath & "\" & techGuideFileName & " " & BrandList(b) & ".xlsx"
+            
+            wbBrandedTechGuide.Activate
+            Set nmsInTechGuide = ActiveWorkbook.Names
+            wbBrandedTechGuide.SaveAs fileName:=fileNew, FileFormat:=xlOpenXMLWorkbook, CreateBackup:=False
+        
+            'For each named range in the branded product offerings workbook
+            wbBrandedProductOfferings.Activate
+            For Each nName In wbBrandedProductOfferings.Names 'nms
+                On Error Resume Next
+                    Application.GoTo reference:=nName.name
+                    Set thisBrandRng = Selection
+                On Error GoTo 0
+    
+                For c = 1 To thisBrandRng.Columns.Count
+                    'identify the york brand column
+                    If thisBrandRng(1, c) = BrandList(york) Then
+                        yorkColumn = c
+                    End If
+                   'identify the target brand column
+                    If thisBrandRng(1, c) = BrandList(b) Then
+                        brandColumn = c
+                    End If
+                Next c
+                
+                'for each brand column in the range
+                For c = 1 To thisBrandRng.Columns.Count
+                    If c = brandColumn Then
+                        'for each row in the named range
+                        For r = 1 To thisBrandRng.Rows.Count
+                            thisModel = thisBrandRng(r, yorkColumn)
+                            If thisModel = "" Then
+                                thisModel = "-n-"
+                            End If
+                            
+                            targetModel = thisBrandRng(r, brandColumn)
+                            If targetModel = "" Then
+                                targetModel = "-n-"
+                                If thisModel <> targetModel Then 'will show there are rows and/or columns that need to be deleted
+                                    deleteThisData = True
+                                End If
+                            End If
+
+                            If thisModel <> targetModel And thisModel <> "-n-" Then 'as long as these two models are not the same
+                                'find this brand equivalent of the target brand model and replace with target brand model
+                                For Each ws In wbBrandedTechGuide.Worksheets
+                                    With ws
+                                        .Cells.Replace What:=thisModel, Replacement:=targetModel, LookAt:= _
+                                        xlWhole, SearchOrder:=xlByRows, MatchCase:=False, SearchFormat:=False, _
+                                        ReplaceFormat:=False
+                                        'xlPart [use this for partial matches]
+                                        'xlWhole [use this for exact matches]
+                                    End With
+                                Next ws
+                            End If
+                        Next r
+                    
+                    Exit For
+                    
+                    End If
+                    
+                Next c
+      
+            Next nName
+        
+            'Create workbook for each named range
+            'For each named range in the workbook
+            For n = 1 To nmsInTechGuide.Count
+                isSelectedTable = False
+                For i = 1 To UBound(TableList, 1)
+                    If nmsInTechGuide(n).name = TableList(i) Then isSelectedTable = True
+                Next i
+                
+                If isSelectedTable Then
+                    Set wbNew = Workbooks.add
+            
+                    wbBrandedTechGuide.Activate
+                    
+                    Application.GoTo reference:=nmsInTechGuide(n).RefersToRange
+                    Set thisRng = Selection
+                    
+                    lStartC = thisRng.Column
+                    lStartR = thisRng.Row
+                    
+                    If thisRng.Rows.Count > thisRng.Columns.Count Then
+                        theLargerOfTheTwo = thisRng.Rows.Count
+                    Else
+                        theLargerOfTheTwo = thisRng.Columns.Count
+                    End If
+                    
+                    ReDim sizeColAndRow(1 To theLargerOfTheTwo, 1 To 2) As Variant
+                    
+                    'Capture the size of each row
+                    For r = 1 To thisRng.Rows.Count
+                        If newRowHeight > 0 And Rows((thisRng.Row - 1) + r).RowHeight > 0 Then
+                            sizeColAndRow(r, 1) = newRowHeight
+                        Else
+                            sizeColAndRow(r, 1) = Rows((thisRng.Row - 1) + r).RowHeight
+                        End If
+                    Next r
+                           
+                    'If there is a cell that has "-n-"
+                        'If in column > lStartC
+                            'If row = 2
+                                'Delete Column from table
+                            'If row > 2 Or column = 1
+                                'Delete Row from table
+'                    tableRowCounter = 1
+'&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&& check issue here when it deletes the AH column for Guardian/Evcon
+                    If deleteThisData Then
+                        For thisCol = 1 To thisRng.Columns.Count
+                            tableRowCounter = 1
+                            For thisRow = 1 To thisRng.Rows.Count
+                                deleteCol = False
+                                deleteRow = False
+                                
+                                If Cells(thisRow - 1 + lStartR, thisCol - 1 + lStartC) = "-n-" Then 'InStr(1, Cells(thisRow - 1 + lStartR, thisCol - 1 + lStartC), "-n-") <> 0 Then
+                                    If thisCol = 1 Or (InStr(1, nmsInTechGuide(n).name, "PhysicalAndElectrical", vbTextCompare) = 0 And InStr(1, nmsInTechGuide(n).name, "SystemCharge") = 0) Then
+                                        'Delete Row
+                                        deleteRow = True
+'                                    ElseIf thisCol > 1 And thisRow = 2 And (Cells(thisRow - 1 + lStartR, thisCol - 1 + lStartC) = "AIR HANDLERS" Or Cells(thisRow - 1 + lStartR, thisCol - 1 + lStartC) = "FURNACES") Then
+'                                        'Delete Row
+'                                        deleteRow = True
+                                    ElseIf thisCol > 1 And thisRow >= 2 Then
+                                        'Delete Column
+                                        deleteCol = True
+                                    End If
+                                End If
+                                
+                                If deleteCol Then
+                                    'Delete Column
+                                    Columns(thisCol - 1 + lStartC).Delete
+                                    thisCol = thisCol - 1
+                                End If
+                                If deleteRow Then
+                                    'Delete Row
+                                    Range(Cells(thisRow - 1 + lStartR, thisCol - 2 + lStartC), Cells(thisRow - 1 + lStartR, thisRng.Columns.Count - 1 + lStartC)).Delete Shift:=xlUp
+                                    sizeColAndRow(tableRowCounter, 1) = "x"
+                                    thisRow = thisRow - 1
+                                End If
+                                
+                                If tableRowCounter < UBound(sizeColAndRow, 1) Then
+                                    tableRowCounter = tableRowCounter + 1
+                                End If
+                            Next thisRow
+                        Next thisCol
+                    
+                        'Reset thisRng to the rows/columns left
+                        'need to ensure rows/columns selected are all populated (no deleted/blank rows or columns) Count rows/cols deleted and then select area from Cells(lStartR,lStartC) to Cells(lStartR - 1 + thisRng.Rows.Count - ROWSDELETED
+                        Application.GoTo reference:=nmsInTechGuide(n).RefersToRange
+                        Set thisRng = Selection
+                        
+                        lStartC = thisRng.Column
+                        lStartR = thisRng.Row
+                    
+                    End If
+                    
+                    'Format the Branded Tech Guide Spreadsheet
+                    tableRowCounter = 1
+                    'Format the rows to mirror sizing of original table
+                    For r = 1 To UBound(sizeColAndRow, 1) 'thisRng.Rows.Count
+                        If sizeColAndRow(r, 1) <> "x" Then
+                            Rows(tableRowCounter + lStartR - 1).RowHeight = sizeColAndRow(r, 1)
+                            tableRowCounter = tableRowCounter + 1
+                        End If
+                    Next r
+                    
+                    'Capture the size of each column
+                    For c = 1 To thisRng.Columns.Count
+'                        sizeColAndRow(c, 2) = Columns((thisRng.Column - 1) + c).ColumnWidth
+                        If newColumnWidth > 0 And Columns((thisRng.Column - 1) + c).ColumnWidth > 0 Then
+                            sizeColAndRow(c, 2) = newColumnWidth
+                        Else
+                            sizeColAndRow(c, 2) = Columns((thisRng.Column - 1) + c).ColumnWidth
+                        End If
+                    Next c
+                    
+                    'Copy the named range
+                    Selection.Copy
+                    wbNew.Activate
+                    Cells(1, 1).Select
+                    'Paste the named range into the new workbook
+                    Selection.PasteSpecial
+                    Application.CutCopyMode = False
+                    wbNew.Activate
+                    
+                    tableRowCounter = 1
+                    'Format the rows to mirror sizing of original table
+                    For r = 1 To UBound(sizeColAndRow, 1) 'thisRng.Rows.Count
+                        If sizeColAndRow(r, 1) <> "x" Then
+                            Rows(tableRowCounter).RowHeight = sizeColAndRow(r, 1)
+                            tableRowCounter = tableRowCounter + 1
+                        End If
+                    Next r
+        
+                    'Format the columns to mirror sizing of the original table
+                    For c = 1 To thisRng.Columns.Count
+                        Columns(c).ColumnWidth = sizeColAndRow(c, 2)
+                    Next c
+            
+                    
+                    'Might want to create named range same as the main file **********************************************************************
+                    
+            
+                    'file name
+'                    fileNew = fldrpath & "\" & nmsInTechGuide(n).name & ".xlsx"
+                    fileNew = fldrpath & "\" & nmsInTechGuide(n).name & ".xlsx"
+                    
+                    wbNew.SaveAs fileName:=fileNew, FileFormat:=xlOpenXMLWorkbook, CreateBackup:=False
+                    wbNew.Close
+            
+                    'If table should be made with header only AND without headers
+                    If InStr(1, nmsInTechGuide(n).name, "System") > 0 Or InStr(1, nmsInTechGuide(n).name, "CoolingCapacity") > 0 Or InStr(1, nmsInTechGuide(n).name, "HeatingCapacity") > 0 Or InStr(1, Left(nmsInTechGuide(n).name, 10), "AirHandler") > 0 Or InStr(1, Left(nmsInTechGuide(n).name, 7), "Furnace") > 0 Then
+                        'Determine number of header rows
+                        If InStr(1, nmsInTechGuide(n).name, "System") > 0 Then
+                            HeaderRows = 4
+                            thisName = nmsInTechGuide(n).name
+                        ElseIf InStr(1, nmsInTechGuide(n).name, "CoolingCapacity") > 0 Or InStr(1, nmsInTechGuide(n).name, "HeatingCapacity") > 0 Then
+                            HeaderRows = 5
+                            thisName = nmsInTechGuide(n).name
+                        ElseIf InStr(1, Left(nmsInTechGuide(n).name, 10), "AirHandler") > 0 Or InStr(1, Left(nmsInTechGuide(n).name, 7), "Furnace") > 0 Then
+                            HeaderRows = 1
+                            If InStr(1, Left(nmsInTechGuide(n).name, 10), "AirHandler") > 0 Then
+                                thisName = "AirHandler"
+                            ElseIf InStr(1, Left(nmsInTechGuide(n).name, 7), "Furnace") > 0 Then
+                                thisName = "Furnace"
+                            End If
+                        End If
+                        
+                        Set wbNew = Workbooks.add
+                        wbBrandedTechGuide.Activate
+                        Application.GoTo reference:=nmsInTechGuide(n).name
+                        
+                        'Copy the named range
+                        Selection.Copy
+                        wbNew.Activate
+                        Cells(1, 1).Select
+                        'Paste the named range into the new workbook
+                        Selection.PasteSpecial
+                        Application.CutCopyMode = False
+                        wbNew.Activate
+                        
+                        'Delete non header rows
+                        Rows(HeaderRows + 1 & ":" & thisRng.Rows.Count).Delete
+                        
+                        tableRowCounter = 1
+                        'Format the rows to mirror sizing of original table
+                        For r = 1 To HeaderRows
+                            If sizeColAndRow(r, 1) <> "x" Then
+                                Rows(tableRowCounter).RowHeight = sizeColAndRow(r, 1)
+                                tableRowCounter = tableRowCounter + 1
+                            End If
+                        Next r
+                        
+                        'Format the columns to mirror sizing of the original table
+                        For c = 1 To thisRng.Columns.Count
+                            Columns(c).ColumnWidth = sizeColAndRow(c, 2)
+                        Next c
+                        
+                        'file name
+                        fileNew = fldrpath & "\" & thisName & "Header" & ".xlsx"
+                        wbNew.SaveAs fileName:=fileNew, FileFormat:=xlOpenXMLWorkbook, CreateBackup:=False
+                        wbNew.Close
+                        
+                        '***********************************************************************************************
+                        
+                        'Create body file without HeaderRows
+                        Set wbNew = Workbooks.add
+                        wbBrandedTechGuide.Activate
+                        Application.GoTo reference:=nmsInTechGuide(n).name
+                        
+                        'Copy the named range
+                        Selection.Copy
+                        wbNew.Activate
+                        Cells(1, 1).Select
+                        'Paste the named range into the new workbook
+                        Selection.PasteSpecial
+                        Application.CutCopyMode = False
+                        wbNew.Activate
+                        
+                        'Delete header rows
+                        Rows(1 & ":" & HeaderRows).Delete
+                        
+                        tableRowCounter = 1
+                        'Format the rows to mirror sizing of original table
+                        For r = 1 To UBound(sizeColAndRow, 1) - HeaderRows
+                            If sizeColAndRow(r + HeaderRows, 1) <> "x" Then
+                                Rows(tableRowCounter).RowHeight = sizeColAndRow(r + HeaderRows, 1)
+                                tableRowCounter = tableRowCounter + 1
+                            End If
+                        Next r
+                        
+                        'Format the columns to mirror sizing of the original table
+                        For c = 1 To thisRng.Columns.Count
+                            Columns(c).ColumnWidth = sizeColAndRow(c, 2)
+                        Next c
+                        
+                        'file name
+                        fileNew = fldrpath & "\" & nmsInTechGuide(n).name & "Body" & ".xlsx"
+                        wbNew.SaveAs fileName:=fileNew, FileFormat:=xlOpenXMLWorkbook, CreateBackup:=False
+                        wbNew.Close
+                    End If
+                End If
+            Next n
+        
+            wbBrandedTechGuide.Save
+            wbBrandedTechGuide.Close
+    
+        End If
+    Next b
+    
+    wbBrandedProductOfferings.Close
+    
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+
+    Unload Me
+    MsgBox "Finished!"
+
+End Sub
+
+'User selected file
+Private Function UserSelectedFile(ByVal message As String) As String
+    On Error Resume Next
+    Dim name As String
+    name = Application.GetOpenFilename(FileFilter:="Excel Files (*.xls*), *.xls*", Title:=message, MultiSelect:=False)
+    
+    UserSelectedFile = name
+
+End Function
+
+Private Sub Open_Files()
+    On Error Resume Next
+    'Open New Branded Product Offering spreadsheet
+    Set wbBrandedProductOfferings = Workbooks.Open(UserSelectedFile("Select New Branded Product Offering"))
+    
+    'Open Tech Guide Spreadsheet
+    fileTechGuide = UserSelectedFile("Select Tech Guide Spreadsheet")
+    
+    Set wbTechGuide = Workbooks.Open(fileTechGuide)
+    wbTechGuide.Activate
+    
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+
+    'identify file path
+    filePath = wbTechGuide.FullName
+    filePath = Left(wbTechGuide.FullName, Len(wbTechGuide.FullName) - Len(wbTechGuide.name))
+'    filePath = Left(fileTechGuide, Len(fileTechGuide) - Len(wbTechGuide.name))
+    'identify tech guide file name
+    techGuideFileName = Left(wbTechGuide.name, Len(wbTechGuide.name) - 5)
+    
+    'Put Names of all Named ranges in a Variant & determine which format should be applied
+'    Set nmsInTechGuide = wbTechGuide.Names 'ActiveWorkbook.Names
+    
+    'Delete any named ranges with broken reference
+    For Each nNameOfTable In wbTechGuide.Names 'nmsInTechGuide
+        Application.GoTo reference:=nNameOfTable.RefersToRange
+        
+        If InStr(1, nNameOfTable.RefersTo, "#REF!") > 0 Then '
+            nNameOfTable.Delete
+        End If
+    Next nNameOfTable
+
+    york = 1
+    
+    ReDim BrandList(1 To 7) As Variant
+    
+    BrandList(york) = "York"
+    BrandList(2) = "Coleman"
+    BrandList(3) = "Luxaire"
+    BrandList(4) = "Generic"
+    BrandList(5) = "Evcon"
+    BrandList(6) = "Guardian"
+    BrandList(7) = "Dayton"
+'    BrandList(8) = "Revolv"
+End Sub
+
+Private Sub UserForm_Initialize()
+    On Error Resume Next
+    'Run first part of macro that has user select files
+    'Find list of named ranges in tech guide spreadsheet
+    Open_Files
+    
+    'Populate Brand List
+    For i = 1 To UBound(BrandList, 1)
+'        lbAvailableBrands.AddItem BrandList(i)
+        With lbAvailableBrands
+            .AddItem BrandList(i)
+        End With
+        
+        'add york as a default selected brand (Marcie will need to remove in order to run Gurandian/Evcon only models like GAW/QH4)
+        If i = york Then
+            With lbSelectedBrands
+                .AddItem BrandList(i)
+            End With
+        End If
+        
+    Next i
+    
+    'Populate Table List (named ranges)
+'    Set nmsInTechGuide = wbTechGuide.Names
+    For Each nNameOfTable In wbTechGuide.Names 'nmsInTechGuide
+'        lbAvailableTables.AddItem nNameOfTable.name
+        With lbAvailableTables
+            .AddItem nNameOfTable.name
+        End With
+        
+    Next nNameOfTable
+    
+    'Populate Row Height and Column Width ComboBoxes
+    Populate_RowHeight_And_ColumnWidth_ComboBoxes
+    
+    'Set multi select option on ListBoxes
+    lbAvailableBrands.MultiSelect = 2
+    lbSelectedBrands.MultiSelect = 2
+    lbAvailableTables.MultiSelect = 2
+    lbSelectedTables.MultiSelect = 2
+    
+    cbRowHeight.Value = "default"
+    cbColumnWidth.Value = "default"
+End Sub
+
+Private Sub Populate_RowHeight_And_ColumnWidth_ComboBoxes()
+    'Populate Row Height combo box
+    With cbRowHeight
+        .AddItem 7.5
+        .AddItem 8.25
+        .AddItem 9
+        .AddItem 9.75
+        .AddItem 10.5
+        .AddItem 11.25
+        .AddItem 12
+        .AddItem 12.75
+        .AddItem 13.5
+        .AddItem 14.25
+        .AddItem 15
+        .AddItem 15.75
+        .AddItem 16.5
+        .AddItem 17.25
+        .AddItem 18
+    End With
+    
+    'Populate Column Width combo box
+    With cbColumnWidth
+        .AddItem 1
+        .AddItem 1.14
+        .AddItem 1.29
+        .AddItem 1.43
+        .AddItem 1.57
+        .AddItem 1.71
+        .AddItem 1.86
+        .AddItem 2
+        .AddItem 2.14
+        .AddItem 2.29
+        .AddItem 2.43
+        .AddItem 2.57
+        .AddItem 2.71
+        .AddItem 2.86
+        .AddItem 3
+        .AddItem 3.14
+        .AddItem 3.29
+        .AddItem 3.43
+        .AddItem 3.57
+        .AddItem 3.71
+        .AddItem 3.86
+        .AddItem 4
+        .AddItem 4.14
+        .AddItem 4.29
+        .AddItem 4.43
+        .AddItem 4.57
+        .AddItem 4.71
+        .AddItem 4.86
+        .AddItem 5
+        .AddItem 5.14
+        .AddItem 5.29
+        .AddItem 5.43
+        .AddItem 5.57
+        .AddItem 5.71
+        .AddItem 5.86
+        .AddItem 6
+        .AddItem 6.14
+        .AddItem 6.29
+        .AddItem 6.43
+        .AddItem 6.57
+        .AddItem 6.71
+        .AddItem 6.86
+        .AddItem 7
+        .AddItem 7.14
+        .AddItem 7.29
+        .AddItem 7.43
+        .AddItem 7.57
+        .AddItem 7.71
+        .AddItem 7.86
+        .AddItem 8
+        .AddItem 8.14
+        .AddItem 8.29
+        .AddItem 8.43
+        .AddItem 8.57
+        .AddItem 8.71
+        .AddItem 8.86
+        .AddItem 9
+        .AddItem 9.14
+        .AddItem 9.29
+        .AddItem 9.43
+        .AddItem 9.57
+        .AddItem 9.71
+        .AddItem 9.86
+        .AddItem 10
+        .AddItem 10.14
+        .AddItem 10.29
+        .AddItem 10.43
+        .AddItem 10.57
+        .AddItem 10.71
+        .AddItem 10.86
+        .AddItem 11
+        .AddItem 11.14
+        .AddItem 11.29
+        .AddItem 11.43
+        .AddItem 11.57
+        .AddItem 11.71
+        .AddItem 11.86
+        .AddItem 12
+        .AddItem 12.14
+        .AddItem 12.29
+        .AddItem 12.43
+        .AddItem 12.57
+        .AddItem 12.71
+        .AddItem 12.86
+        .AddItem 13
+        .AddItem 13.14
+        .AddItem 13.29
+        .AddItem 13.43
+        .AddItem 13.57
+        .AddItem 13.71
+        .AddItem 13.86
+        .AddItem 14
+        .AddItem 14.14
+        .AddItem 14.29
+        .AddItem 14.43
+        .AddItem 14.57
+        .AddItem 14.71
+        .AddItem 14.86
+        .AddItem 15
+        .AddItem 15.14
+        .AddItem 15.29
+        .AddItem 15.43
+        .AddItem 15.57
+        .AddItem 15.71
+        .AddItem 15.86
+        .AddItem 16
+        .AddItem 16.14
+        .AddItem 16.29
+        .AddItem 16.43
+        .AddItem 16.57
+        .AddItem 16.71
+        .AddItem 16.86
+        .AddItem 17
+        .AddItem 17.14
+        .AddItem 17.29
+        .AddItem 17.43
+        .AddItem 17.57
+        .AddItem 17.71
+        .AddItem 17.86
+        .AddItem 18
+    End With
+    
+End Sub
+
+
+
+
